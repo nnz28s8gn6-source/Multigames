@@ -50,6 +50,7 @@ canvas{background:var(--cv);border-radius:12px;width:100%;max-width:min(1000px,c
   <div id="gname" style="color:var(--mut);font-size:14px"></div>
   <div id="p2"><div id="pd"></div></div>
   <button id="enable">Enable motion</button>
+  <button id="retry" class="hide">Try again</button>
   <div id="padmsg" class="err hide"></div>
   <button id="tap" class="hide">TAP</button>
   <button id="startBtn" class="alt hide">Start / next round</button>
@@ -73,6 +74,8 @@ canvas{background:var(--cv);border-radius:12px;width:100%;max-width:min(1000px,c
 const $ = id => document.getElementById(id);
 const PREFIX = "tiltparty-", W = 960, H = 540;
 const COLORS = ["#e6492d","#2d8fe6","#2dbd6e","#e6b42d","#a14de0","#e66fb0","#2dd3d3","#f08a2d"];
+const ICE = {iceServers:[{urls:"stun:stun.l.google.com:19302"},{urls:"stun:stun.cloudflare.com:3478"},{urls:["turn:openrelay.metered.ca:80","turn:openrelay.metered.ca:443","turn:openrelay.metered.ca:443?transport=tcp"],username:"openrelayproject",credential:"openrelayproject"}]};
+const PO = {config:ICE};
 const cl = (v,m) => Math.max(-m, Math.min(m, v));
 const show = id => ["pick","pad","game"].forEach(x => $(x).classList.toggle("hide", x!==id));
 const perr = m => { const e=$("perr"); e.textContent=m; e.classList.remove("hide"); };
@@ -90,18 +93,34 @@ function startPad(code){
   const setMe=(t,c)=>{ const m=$("me"); m.textContent=t; m.style.background=c||"var(--bg)"; m.style.color=c?"#111":"var(--fg)"; };
   const st=(on,t)=>{ $("pdot").classList.toggle("on",on); $("pstat").textContent=t; };
   const send=o=>{ if (conn && conn.open) conn.send(o); };
-  const peer = new Peer();
-  peer.on("error", e => { st(0,"Can’t reach game ("+(e.type||"error")+"). Check code and Wi‑Fi."); setMe("Not connected"); });
-  peer.on("open", () => {
-    conn = peer.connect(PREFIX+code, {reliable:true});
-    conn.on("open", () => { st(1,"Connected · game "+code); setMe("Joining…"); });
-    conn.on("close", () => { st(0,"Disconnected"); setMe("Disconnected"); });
-    conn.on("data", m => {
+  if (typeof RTCPeerConnection==="undefined") { st(0,"This browser can’t connect to the game. Open the link in Safari or Chrome (not inside another app)."); setMe("Unsupported browser"); return; }
+  let tries=0, peer, peerUp=0;
+  const fail=t=>{ st(0,t); setMe("Not connected"); $("retry").classList.remove("hide"); $("retry").onclick=()=>{ location.href=location.pathname+"?join="+code; }; };
+  try { peer = new Peer(undefined, PO); } catch(e){ return fail("Couldn’t start networking."); }
+  setTimeout(()=>{ if(!peerUp) fail("Can’t reach the connection server. Turn off VPN / iCloud Private Relay / content blockers and try again."); }, 10000);
+  peer.on("disconnected", () => { try{ peer.reconnect(); }catch(x){} });
+  peer.on("error", e => {
+    if (e.type==="peer-unavailable") fail("Game "+code+" not found. Check the code and that the game screen is open.");
+    else if (!conn || !conn.open) st(0,"Network problem ("+(e.type||"error")+"). Retrying…");
+  });
+  function connect(){
+    tries++; st(0,"Connecting to game "+code+"… (try "+tries+")"); setMe("Connecting…");
+    const c = conn = peer.connect(PREFIX+code, {reliable:true, serialization:"json"});
+    const to = setTimeout(() => {
+      if (c.open) return;
+      try{ c.close(); }catch(x){}
+      if (tries<4) connect();
+      else { let ice=""; try{ ice=" ("+c.peerConnection.iceConnectionState+")"; }catch(x){} fail("Found the server but couldn’t reach the game"+ice+". Use the same Wi‑Fi as the game screen, turn off iCloud Private Relay, and make sure the game screen is open."); }
+    }, 9000);
+    c.on("open", () => { clearTimeout(to); $("retry").classList.add("hide"); st(1,"Connected · game "+code); setMe("Joining…"); });
+    c.on("close", () => { if (conn===c) { st(0,"Disconnected"); setMe("Disconnected"); } });
+    c.on("data", m => {
       if (!m) return;
       if (m.t==="h") { try { navigator.vibrate && navigator.vibrate(150); } catch(x){} return; }
       if (m.t==="s") { setMe("P"+(m.i+1)+(m.x?" · "+m.x:""), COLORS[m.i%8]); $("gname").textContent = m.g||""; }
     });
-  });
+  }
+  peer.on("open", () => { peerUp=1; connect(); });
   setInterval(() => send({t:"in", x:+tx.toFixed(2), y:+ty.toFixed(2)}), 33);
   $("tap").onpointerdown = e => { e.preventDefault(); send({t:"b"}); };
   $("startBtn").onclick = () => send({t:"go"});
@@ -261,7 +280,7 @@ function startGame(){
   let peer, code;
   const mk=()=>{ const a="ABCDEFGHJKLMNPQRSTUVWXYZ"; let s=""; for(let i=0;i<4;i++) s+=a[Math.floor(Math.random()*a.length)]; return s; };
   function openPeer(){
-    code=mk(); peer=new Peer(PREFIX+code);
+    code=mk(); peer=new Peer(PREFIX+code,PO);
     peer.on("open",()=>{ $("joincode").textContent=code; const url=location.origin+location.pathname+"?join="+code; $("joinurl").textContent=location.host+location.pathname;
       try{ const q=qrcode(0,"M"); q.addData(url); q.make(); $("qr").innerHTML=q.createImgTag(4,4); }catch(e){} });
     peer.on("error",e=>{ if(e.type==="unavailable-id"){ try{peer.destroy();}catch(x){} openPeer(); } else $("gstat").textContent="Network issue: "+(e.type||"error")+" (keyboard still works)"; });
