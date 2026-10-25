@@ -37,6 +37,29 @@ canvas{background:var(--cv);border-radius:12px;width:100%;max-width:min(1000px,c
 #rGas{flex:1.7;background:var(--ok)}
 #rst{height:110px;border-radius:16px;background:var(--bg);position:relative;touch-action:none;font-weight:700;color:var(--mut);display:flex;align-items:center;justify-content:center;letter-spacing:2px}
 #rk{position:absolute;top:10px;bottom:10px;width:30px;border-radius:15px;background:var(--acc);left:50%;transform:translateX(-50%)}
+#game:fullscreen{background:var(--bg);justify-content:center;padding:0;width:100vw;height:100vh}
+#game:fullscreen canvas{max-width:min(100vw,calc(100vh*1.7778));max-height:100vh;border-radius:0}
+#game:fullscreen #join,#game:fullscreen #fswrap{display:none}
+#game:-webkit-full-screen{background:var(--bg);justify-content:center;padding:0;width:100vw;height:100vh}
+#game:-webkit-full-screen canvas{max-width:min(100vw,calc(100vh*1.7778));max-height:100vh;border-radius:0}
+#game:-webkit-full-screen #join,#game:-webkit-full-screen #fswrap{display:none}
+@media (orientation:landscape) and (max-height:560px){
+  body{align-items:flex-start;padding:6px}
+  #pad{max-width:100%;padding:8px;display:flex;flex-wrap:wrap;gap:6px;align-items:stretch}
+  #pad>*{margin:0!important}
+  #me{flex:1 1 100%;padding:8px}
+  #gname,#rhint{display:none}
+  #pad>p{flex:1 1 100%;font-size:12px}
+  #p2{width:70px;height:70px}
+  #pad button{width:auto;flex:1;padding:10px}
+  #tap{height:70px}
+  #rc{flex:1 1 100%;display:flex;gap:10px}
+  #rst{order:0;flex:1.3;height:130px}
+  #rrow{order:1;flex:1;display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  #rrow button{height:auto}
+  #rGas{grid-column:1/3;height:76px}
+  #rBr,#rNi{height:46px}
+}
 .err{color:#d33;font-size:14px;margin-top:10px}
 </style>
 </head>
@@ -61,17 +84,21 @@ canvas{background:var(--cv);border-radius:12px;width:100%;max-width:min(1000px,c
   <button id="tap" class="hide">TAP</button>
   <div id="rc" class="hide">
     <div id="rrow"><button id="rBr" class="alt">BRAKE</button><button id="rGas">GAS</button><button id="rNi" class="alt">NITRO</button></div>
-    <div id="rst">◀ &nbsp; STEER &nbsp; ▶<div id="rk"></div></div>
+    <div id="rst"><span id="rlab">TILT TO STEER</span><div id="rk"></div></div>
+    <div id="rhint" style="font-size:12px;color:var(--mut);margin-top:6px">Tip: hold the phone sideways like a steering wheel, then tap Recenter to set “straight ahead”.</div>
   </div>
   <button id="startBtn" class="alt hide">Start / next round</button>
   <button id="homeBtn" class="alt hide">Home menu</button>
+  <button id="fsPad" class="alt hide">Full screen · landscape</button>
   <button id="recenter" class="alt hide">Recenter</button>
+  <button id="rMode" class="alt hide">Steering: TILT</button>
   <p style="margin-top:12px;font-size:14px"><span class="dot" id="pdot"></span><span id="pstat">Connecting…</span></p>
 </div>
 
 <div id="game" class="hide" style="display:flex">
   <canvas id="cv" width="960" height="540"></canvas>
-    <div id="join">
+    <div id="fswrap"><button class="sm alt" id="fsBtn">⛶ Full screen (F)</button></div>
+  <div id="join">
     <div id="qr"></div>
     <div>Phones: scan, or open<br><span id="joinurl"></span><br>Code <b id="joincode">----</b><br><span id="gstat"></span></div>
   </div>
@@ -110,7 +137,7 @@ function startPad(code){
   show("pad");
   if (typeof mqtt==="undefined") { $("pstat").textContent="Couldn’t load the networking library."; return; }
   const id=Math.random().toString(36).slice(2,10), TOP=T+"/"+code, t0=performance.now();
-  let en=0, tx=0, ty=0, bc=0, go=0, hm=0, gam=0, bet=0, rg=0, rb=0, first=1, got=0, lastHost=0;
+  let en=0, tiltSteer=1, wasRace=0, tx=0, ty=0, bc=0, go=0, hm=0, gam=0, bet=0, rg=0, rb=0, first=1, got=0, lastHost=0;
   const setMe=(t,c)=>{ const m=$("me"); m.textContent=t; m.style.background=c||"var(--bg)"; m.style.color=c?"#111":"var(--fg)"; };
   const st=(on,t)=>{ $("pdot").classList.toggle("on",on); $("pstat").textContent=t; };
   const net=makeNet((tp,m)=>{
@@ -118,7 +145,11 @@ function startPad(code){
     if (m.t==="h") { try { navigator.vibrate && navigator.vibrate(150); } catch(x){} }
     else if (m.t==="s") {
       setMe("P"+(m.i+1)+(m.x?" · "+m.x:""), COLORS[m.i%8]); $("gname").textContent=m.g||"";
-      const rc=m.c==="race"; $("rc").classList.toggle("hide",!rc); $("p2").classList.toggle("hide",rc); $("tap").classList.toggle("hide",rc||!en);
+      const rc=m.c==="race";
+      if(rc&&!wasRace){ rg=gam; rb=bet; } wasRace=rc;
+      $("rMode").classList.toggle("hide",!rc);
+      if(rc&&tiltSteer) $("rlab").textContent=en?"TILT TO STEER":"Tap “Enable motion” first";
+      $("rc").classList.toggle("hide",!rc); $("p2").classList.toggle("hide",rc); $("tap").classList.toggle("hide",rc||!en);
     }
   }, [TOP+"/to/"+id]);
   const ri={st:0,th:0,br:0,ni:0};
@@ -134,21 +165,31 @@ function startPad(code){
   $("tap").onpointerdown=e=>{ e.preventDefault(); bc++; sendIn(); };
   $("startBtn").onclick=()=>{ go++; sendIn(); };
   $("homeBtn").onclick=()=>{ hm++; sendIn(); };
+  $("rMode").onclick=()=>{ tiltSteer^=1; ri.st=0; $("rk").style.left="50%"; $("rMode").textContent="Steering: "+(tiltSteer?"TILT":"TOUCH"); $("rlab").textContent=tiltSteer?(en?"TILT TO STEER":"Tap “Enable motion” first"):"◀   STEER   ▶"; sendIn(); };
+  const de=document.documentElement;
+  if (de.requestFullscreen||de.webkitRequestFullscreen) $("fsPad").classList.remove("hide");
+  $("fsPad").onclick=()=>{ try{ const f=de.requestFullscreen||de.webkitRequestFullscreen; Promise.resolve(f.call(de)).then(()=>screen.orientation&&screen.orientation.lock&&screen.orientation.lock("landscape")).catch(()=>{}); }catch(x){} };
   const hold=(eid,k)=>{ const el=$(eid), set=v=>{ if(ri[k]!==v){ ri[k]=v; sendIn(); } };
     el.onpointerdown=e=>{ e.preventDefault(); try{ el.setPointerCapture(e.pointerId); }catch(x){} set(1); };
     el.onpointerup=el.onpointercancel=el.onlostpointercapture=()=>set(0);
     el.oncontextmenu=e=>e.preventDefault(); };
   hold("rGas","th"); hold("rBr","br"); hold("rNi","ni");
   const rs=$("rst"), steer=e=>{ const r=rs.getBoundingClientRect(), v=((e.clientX-r.left)/r.width-.5)*2; ri.st=Math.abs(v)<.08?0:cl(v*1.2,1); $("rk").style.left=(50+ri.st*42)+"%"; };
-  rs.onpointerdown=e=>{ e.preventDefault(); try{ rs.setPointerCapture(e.pointerId); }catch(x){} steer(e); sendIn(); };
-  rs.onpointermove=e=>{ if(rs.hasPointerCapture&&rs.hasPointerCapture(e.pointerId)) steer(e); };
-  rs.onpointerup=rs.onpointercancel=()=>{ ri.st=0; $("rk").style.left="50%"; sendIn(); };
+  rs.onpointerdown=e=>{ if(tiltSteer) return; e.preventDefault(); try{ rs.setPointerCapture(e.pointerId); }catch(x){} steer(e); sendIn(); };
+  rs.onpointermove=e=>{ if(!tiltSteer&&rs.hasPointerCapture&&rs.hasPointerCapture(e.pointerId)) steer(e); };
+  rs.onpointerup=rs.onpointercancel=()=>{ if(tiltSteer) return; ri.st=0; $("rk").style.left="50%"; sendIn(); };
   $("recenter").onclick=()=>{ rg=gam; rb=bet; };
+  let lastAng=-1;
   function onO(e){
     if (e.gamma==null) return;
-    got=1; gam=e.gamma; bet=e.beta||0;
-    if (first) { rg=gam; rb=bet; first=0; }
-    tx=cl((gam-rg)/35,1); ty=cl((bet-rb)/35,1);
+    got=1;
+    const b=(e.beta||0)*Math.PI/180, g=e.gamma*Math.PI/180, gx=Math.cos(b)*Math.sin(g), gy=-Math.sin(b);
+    const ang=(((screen.orientation&&typeof screen.orientation.angle==="number")?screen.orientation.angle:(+window.orientation||0))%360+360)%360;
+    let sx=gx, sy=gy; if(ang===90){ sx=-gy; sy=gx; } else if(ang===180){ sx=-gx; sy=-gy; } else if(ang===270){ sx=gy; sy=-gx; }
+    gam=sx; bet=-sy;
+    if (first||ang!==lastAng) { rg=gam; rb=bet; first=0; lastAng=ang; }
+    tx=cl((gam-rg)/.57,1); ty=cl((bet-rb)/.57,1);
+    if (tiltSteer) { const v=Math.abs(tx)<.06?0:cl(tx*1.1,1); ri.st=v; $("rk").style.left=(50+v*42)+"%"; }
     $("pd").style.left=(50+tx*42)+"%"; $("pd").style.top=(50+ty*42)+"%";
   }
   $("enable").onclick=()=>{
@@ -350,7 +391,7 @@ function startGame(){
     },
     st(s){ return "Team "+(s.i%2?"B":"A")+" · "+this.sc[0]+"–"+this.sc[1]; } },
 
-  { n:"Turbo Drift", ic:"🏎️", c:"#d9531e", ctl:"race", s:"Touch-controlled racing", d:"Race 4 laps. Steer with the strip, GAS and BRAKE with your thumbs. Powerslide corners to charge NITRO, then boost! Bots fill empty grid spots.",
+  { n:"Turbo Drift", ic:"🏎️", c:"#d9531e", ctl:"race", s:"Tilt-steered racing", d:"Race 4 laps. Tilt your phone like a steering wheel, and use GAS, BRAKE and NITRO with your thumbs. Powerslide corners to charge NITRO, then boost! Bots fill empty grid spots.",
     mk(){
       const P=[[895,272],[834,419],[693,461],[547,431],[413,431],[267,461],[126,419],[65,272],[126,125],[267,83],[413,113],[547,113],[693,83],[834,125]], n=P.length, S=24, px=[], py=[];
       for(let i=0;i<n;i++){ const a=P[(i+n-1)%n], b=P[i], c=P[(i+1)%n], d=P[(i+2)%n];
@@ -466,10 +507,13 @@ function startGame(){
   const btnAll=s=>{ if(state==="home"){ begin(hc); return; } if(state==="playing"&&s.in&&G[gi].btn) G[gi].btn(s); };
 
   // ---------- keyboard / UI ----------
+  const goFS=()=>{ const el=$("game"), d=document; if(d.fullscreenElement||d.webkitFullscreenElement){ (d.exitFullscreen||d.webkitExitFullscreen).call(d); } else { const f=el.requestFullscreen||el.webkitRequestFullscreen; if(f) f.call(el); } };
+  $("fsBtn").onclick=goFS;
   const km={ArrowLeft:"l",a:"l",ArrowRight:"r",d:"r",ArrowUp:"u",w:"u",ArrowDown:"d",s:"d"};
   addEventListener("keydown",e=>{
     if(km[e.key]) K[km[e.key]]=1;
     if(state==="home"){ const d={ArrowLeft:-1,a:-1,ArrowRight:1,d:1,ArrowUp:-5,w:-5,ArrowDown:5,s:5}[e.key]; if(d) hc=Math.max(0,Math.min(G.length-1,hc+d)); }
+    if(e.key==="f"||e.key==="F") goFS();
     if(e.key==="Enter") begin();
     if(e.key==="Escape") goHome();
     if(e.key===" "){ e.preventDefault(); const k=slots[KBD]; if(k) btnAll(k); else if(state==="home") begin(); }
@@ -507,7 +551,7 @@ function startGame(){
   },250);
 
   function drawHome(all){
-    txt("TILT PARTY",W/2,62,46); txt("Tilt your phone to browse · TAP to pick a game",W/2,92,16,css("--mut"));
+    txt("TILT PARTY",W/2,62,46); txt("Code "+code+"  ·  F = full screen",W-14,24,13,css("--mut"),"right"); txt("Tilt your phone to browse · TAP to pick a game",W/2,92,16,css("--mut"));
     G.forEach((g,k)=>{ const x=15+(k%5)*186, y=120+((k/5)|0)*185, sel=k===hc;
       ctx.fillStyle=css("--card"); ctx.globalAlpha=sel?1:.7; ctx.fillRect(x,y,170,170); ctx.globalAlpha=1;
       ctx.fillStyle=g.c; ctx.fillRect(x,y,170,8);
