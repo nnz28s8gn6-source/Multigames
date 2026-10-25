@@ -31,6 +31,12 @@ canvas{background:var(--cv);border-radius:12px;width:100%;max-width:min(1000px,c
 #p2{width:130px;height:130px;margin:8px auto;border-radius:16px;background:var(--bg);position:relative}
 #pd{position:absolute;width:22px;height:22px;border-radius:50%;background:var(--acc);left:50%;top:50%;transform:translate(-50%,-50%)}
 #tap{height:130px;font-size:28px}
+#rc{touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
+#rrow{display:flex;gap:8px;margin:8px 0}
+#rrow button{margin:0;height:120px;font-size:19px;flex:1;touch-action:none}
+#rGas{flex:1.7;background:var(--ok)}
+#rst{height:110px;border-radius:16px;background:var(--bg);position:relative;touch-action:none;font-weight:700;color:var(--mut);display:flex;align-items:center;justify-content:center;letter-spacing:2px}
+#rk{position:absolute;top:10px;bottom:10px;width:30px;border-radius:15px;background:var(--acc);left:50%;transform:translateX(-50%)}
 .err{color:#d33;font-size:14px;margin-top:10px}
 </style>
 </head>
@@ -53,6 +59,10 @@ canvas{background:var(--cv);border-radius:12px;width:100%;max-width:min(1000px,c
   <button id="retry" class="hide">Try again</button>
   <div id="padmsg" class="err hide"></div>
   <button id="tap" class="hide">TAP</button>
+  <div id="rc" class="hide">
+    <div id="rrow"><button id="rBr" class="alt">BRAKE</button><button id="rGas">GAS</button><button id="rNi" class="alt">NITRO</button></div>
+    <div id="rst">◀ &nbsp; STEER &nbsp; ▶<div id="rk"></div></div>
+  </div>
   <button id="startBtn" class="alt hide">Start / next round</button>
   <button id="homeBtn" class="alt hide">Home menu</button>
   <button id="recenter" class="alt hide">Recenter</button>
@@ -100,15 +110,19 @@ function startPad(code){
   show("pad");
   if (typeof mqtt==="undefined") { $("pstat").textContent="Couldn’t load the networking library."; return; }
   const id=Math.random().toString(36).slice(2,10), TOP=T+"/"+code, t0=performance.now();
-  let tx=0, ty=0, bc=0, go=0, hm=0, gam=0, bet=0, rg=0, rb=0, first=1, got=0, lastHost=0;
+  let en=0, tx=0, ty=0, bc=0, go=0, hm=0, gam=0, bet=0, rg=0, rb=0, first=1, got=0, lastHost=0;
   const setMe=(t,c)=>{ const m=$("me"); m.textContent=t; m.style.background=c||"var(--bg)"; m.style.color=c?"#111":"var(--fg)"; };
   const st=(on,t)=>{ $("pdot").classList.toggle("on",on); $("pstat").textContent=t; };
   const net=makeNet((tp,m)=>{
     lastHost=performance.now();
     if (m.t==="h") { try { navigator.vibrate && navigator.vibrate(150); } catch(x){} }
-    else if (m.t==="s") { setMe("P"+(m.i+1)+(m.x?" · "+m.x:""), COLORS[m.i%8]); $("gname").textContent=m.g||""; }
+    else if (m.t==="s") {
+      setMe("P"+(m.i+1)+(m.x?" · "+m.x:""), COLORS[m.i%8]); $("gname").textContent=m.g||"";
+      const rc=m.c==="race"; $("rc").classList.toggle("hide",!rc); $("p2").classList.toggle("hide",rc); $("tap").classList.toggle("hide",rc||!en);
+    }
   }, [TOP+"/to/"+id]);
-  const sendIn=()=>net.pub(TOP+"/p/"+id,{t:"in",x:+tx.toFixed(2),y:+ty.toFixed(2),bc,go,hm});
+  const ri={st:0,th:0,br:0,ni:0};
+  const sendIn=()=>net.pub(TOP+"/p/"+id,{t:"in",x:+tx.toFixed(2),y:+ty.toFixed(2),bc,go,hm,st:+ri.st.toFixed(2),th:ri.th,br:ri.br,ni:ri.ni});
   setInterval(()=>{
     sendIn();
     const now=performance.now(), up=net.up();
@@ -120,6 +134,15 @@ function startPad(code){
   $("tap").onpointerdown=e=>{ e.preventDefault(); bc++; sendIn(); };
   $("startBtn").onclick=()=>{ go++; sendIn(); };
   $("homeBtn").onclick=()=>{ hm++; sendIn(); };
+  const hold=(eid,k)=>{ const el=$(eid), set=v=>{ if(ri[k]!==v){ ri[k]=v; sendIn(); } };
+    el.onpointerdown=e=>{ e.preventDefault(); try{ el.setPointerCapture(e.pointerId); }catch(x){} set(1); };
+    el.onpointerup=el.onpointercancel=el.onlostpointercapture=()=>set(0);
+    el.oncontextmenu=e=>e.preventDefault(); };
+  hold("rGas","th"); hold("rBr","br"); hold("rNi","ni");
+  const rs=$("rst"), steer=e=>{ const r=rs.getBoundingClientRect(), v=((e.clientX-r.left)/r.width-.5)*2; ri.st=Math.abs(v)<.08?0:cl(v*1.2,1); $("rk").style.left=(50+ri.st*42)+"%"; };
+  rs.onpointerdown=e=>{ e.preventDefault(); try{ rs.setPointerCapture(e.pointerId); }catch(x){} steer(e); sendIn(); };
+  rs.onpointermove=e=>{ if(rs.hasPointerCapture&&rs.hasPointerCapture(e.pointerId)) steer(e); };
+  rs.onpointerup=rs.onpointercancel=()=>{ ri.st=0; $("rk").style.left="50%"; sendIn(); };
   $("recenter").onclick=()=>{ rg=gam; rb=bet; };
   function onO(e){
     if (e.gamma==null) return;
@@ -131,7 +154,7 @@ function startPad(code){
   $("enable").onclick=()=>{
     const msg=$("padmsg");
     const ok=()=>{
-      addEventListener("deviceorientation", onO);
+      addEventListener("deviceorientation", onO); en=1;
       $("enable").classList.add("hide"); ["tap","startBtn","homeBtn","recenter"].forEach(i=>$(i).classList.remove("hide"));
       setTimeout(()=>{ if(!got){ msg.textContent="No motion data. Open this page over HTTPS in Safari/Chrome and allow motion access."; msg.classList.remove("hide"); } },2500);
     };
@@ -325,7 +348,109 @@ function startGame(){
       ctx.fillStyle="#fff"; ctx.strokeStyle="#222"; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(this.b.x,this.b.y,14,0,7); ctx.fill(); ctx.stroke();
       txt(this.sc[0]+" – "+this.sc[1],W/2,40,34); txt(Math.max(0,90-t).toFixed(0)+"s",W/2,64,14,css("--mut"));
     },
-    st(s){ return "Team "+(s.i%2?"B":"A")+" · "+this.sc[0]+"–"+this.sc[1]; } }
+    st(s){ return "Team "+(s.i%2?"B":"A")+" · "+this.sc[0]+"–"+this.sc[1]; } },
+
+  { n:"Turbo Drift", ic:"🏎️", c:"#d9531e", ctl:"race", s:"Touch-controlled racing", d:"Race 4 laps. Steer with the strip, GAS and BRAKE with your thumbs. Powerslide corners to charge NITRO, then boost! Bots fill empty grid spots.",
+    mk(){
+      const P=[[895,272],[834,419],[693,461],[547,431],[413,431],[267,461],[126,419],[65,272],[126,125],[267,83],[413,113],[547,113],[693,83],[834,125]], n=P.length, S=24, px=[], py=[];
+      for(let i=0;i<n;i++){ const a=P[(i+n-1)%n], b=P[i], c=P[(i+1)%n], d=P[(i+2)%n];
+        for(let k=0;k<S;k++){ const u=k/S, u2=u*u, u3=u2*u, f=j=>.5*(2*b[j]+(-a[j]+c[j])*u+(2*a[j]-5*b[j]+4*c[j]-d[j])*u2+(-a[j]+3*b[j]-3*c[j]+d[j])*u3); px.push(f(0)); py.push(f(1)); } }
+      const N=px.length, ux=[], uy=[];
+      for(let i=0;i<N;i++){ const a=px[(i+1)%N]-px[(i+N-1)%N], b=py[(i+1)%N]-py[(i+N-1)%N], m=Math.hypot(a,b)||1; ux.push(a/m); uy.push(b/m); }
+      Object.assign(this,{px,py,ux,uy,N,hw:52});
+      const mkc=()=>{ const c=document.createElement("canvas"); c.width=W; c.height=H; return c; };
+      this.bg=mkc(); this.skid=mkc();
+      const g=this.bg.getContext("2d"), path=()=>{ g.beginPath(); g.moveTo(px[0],py[0]); for(let i=1;i<N;i++) g.lineTo(px[i],py[i]); g.closePath(); };
+      g.fillStyle="#2f7d46"; g.fillRect(0,0,W,H); g.lineJoin="round";
+      path(); g.strokeStyle="#fff"; g.lineWidth=this.hw*2+14; g.stroke();
+      path(); g.strokeStyle="#d33"; g.setLineDash([16,16]); g.stroke(); g.setLineDash([]);
+      path(); g.strokeStyle="#3b3b40"; g.lineWidth=this.hw*2; g.stroke();
+      path(); g.strokeStyle="rgba(255,255,255,.35)"; g.lineWidth=3; g.setLineDash([18,22]); g.stroke(); g.setLineDash([]);
+      g.save(); g.translate(px[0],py[0]); g.rotate(Math.atan2(uy[0],ux[0]));
+      for(let j=0;j<2;j++) for(let k=0;k<10;k++){ g.fillStyle=(j+k)%2?"#fff":"#111"; g.fillRect(-8+j*8,-this.hw+k*this.hw/5,8,this.hw/5); }
+      g.restore();
+    },
+    near(c){ const N=this.N, px=this.px, py=this.py; let b=c.last, bd=1e9;
+      for(let k=-30;k<=30;k++){ const i=(c.last+k+N)%N, d=(px[i]-c.x)**2+(py[i]-c.y)**2; if(d<bd){ bd=d; b=i; } }
+      if(bd>160*160){ bd=1e9; for(let i=0;i<N;i++){ const d=(px[i]-c.x)**2+(py[i]-c.y)**2; if(d<bd){ bd=d; b=i; } } }
+      return [b,Math.sqrt(bd)]; },
+    rank(){ return this.cars.slice().sort((a,b)=>(a.fin&&b.fin)?a.fin-b.fin:a.fin?-1:b.fin?1:b.prog-a.prog); },
+    nm(c){ return c.h?"P"+(c.h.i+1):"Bot "+(c.id+1); },
+    init(pl){
+      if(!this.px) this.mk();
+      const N=this.N; this.laps=4; this.first=null; this.endAt=1e9;
+      this.skid.getContext("2d").clearRect(0,0,W,H);
+      const total=Math.max(4,pl.length); this.cars=[];
+      for(let k=0;k<total;k++){
+        const row=k>>1, side=(k&1)?1:-1, idx=(N-8-row*7+N)%N, nx=-this.uy[idx], ny=this.ux[idx];
+        if(k<pl.length){ pl[k].nb=0; pl[k].alive=1; }
+        this.cars.push({ h:k<pl.length?pl[k]:null, x:this.px[idx]+nx*side*22, y:this.py[idx]+ny*side*22, a:Math.atan2(this.uy[idx],this.ux[idx]), vx:0, vy:0, vf:0, sa:0, n:.3, prog:-(8+row*7), idx, last:idx, dist:22, fin:0, id:k, sk:.9+Math.random()*.08, boost:0, drift:0 });
+      }
+    },
+    step(dt,pl){
+      const N=this.N, hw=this.hw, px=this.px, py=this.py, cs=this.cars;
+      cs.forEach(c=>{
+        let st=0, th=0, br=0, ni=0;
+        const fx0=Math.cos(c.a), fy0=Math.sin(c.a);
+        if(c.h&&!c.fin){ const s=c.h; s.nb=(s.nb||0)-dt; if(s.kbd){ st=s.tx; th=s.ty<-.3?1:0; br=s.ty>.3?1:0; } else { st=s.st; th=s.th; br=s.br; } ni=(s.ni||s.nb>0)?1:0; }
+        else {
+          const L=8+Math.floor(Math.abs(c.vf)/35), ti=(c.idx+L)%N, ang=Math.atan2(py[ti]-c.y,px[ti]-c.x);
+          let d=ang-c.a; d=Math.atan2(Math.sin(d),Math.cos(d)); st=cl(d*2.6,1);
+          let cm=0; for(const k of [10,22,34,46]){ const ci=(c.idx+k)%N; cm=Math.max(cm,Math.abs(Math.atan2(this.uy[ci]*this.ux[c.idx]-this.ux[ci]*this.uy[c.idx], this.ux[ci]*this.ux[c.idx]+this.uy[ci]*this.uy[c.idx]))); }
+          const vt=c.sk*(300-140*Math.min(1,cm/1.5));
+          th=(c.fin?c.vf<150:c.vf<vt)?1:0; br=(!c.fin&&c.vf>vt+45)?1:0; ni=(!c.fin&&cm<1&&c.dist<22&&c.n>.4)?1:0;
+        }
+        c.sa+=(st-c.sa)*Math.min(1,dt*10);
+        const spd0=Math.abs(c.vf);
+        c.a+=c.sa*2.7*Math.min(1,spd0/130)*(c.vf>=0?1:-1)*(1-.45*Math.min(1,spd0/450))*dt;
+        const fx=Math.cos(c.a), fy=Math.sin(c.a), rx=-fy, ry=fx;
+        let vf=c.vx*fx+c.vy*fy, vl=c.vx*rx+c.vy*ry;
+        const off=c.dist>hw, boost=ni&&c.n>.02;
+        const mx=(c.h?1:c.sk)*(off?150:300)*(boost?1.45:1);
+        if(th) vf+=(boost?950:480)*Math.max(0,1-vf/mx)*dt;
+        if(br){ if(vf>5) vf=Math.max(0,vf-900*dt); else vf=Math.max(-90,vf-250*dt); }
+        vf-=vf*(off?2.2:.35)*dt; if(vf>mx) vf-=(vf-mx)*2*dt;
+        const slide=th&&Math.abs(c.sa)>.6&&Math.abs(vf)>200;
+        vl*=Math.exp(-(br?2.2:slide?4.5:boost?6:9)*(off?.6:1)*dt);
+        c.vx=vf*fx+vl*rx; c.vy=vf*fy+vl*ry; c.vf=vf;
+        if(boost){ c.n=Math.max(0,c.n-.45*dt); if(!c.boost) beep(220,.2,"sawtooth",.04); }
+        c.boost=boost?1:0;
+        c.drift=Math.abs(vl)>75&&Math.abs(vf)>140?1:0;
+        if(!boost) c.n=Math.min(1,c.n+(c.drift?.4:.05)*dt);
+        c.x+=c.vx*dt; c.y+=c.vy*dt;
+        if(c.drift){ const sg=this.skid.getContext("2d"); sg.fillStyle="rgba(0,0,0,.28)"; for(const sd of [-6,6]) sg.fillRect(c.x-fx*9+rx*sd-1.5,c.y-fy*9+ry*sd-1.5,3,3); }
+        const [idx,dist]=this.near(c); c.dist=dist;
+        if(dist>hw+24){ const nx=(c.x-px[idx])/dist, ny=(c.y-py[idx])/dist; c.x=px[idx]+nx*(hw+24); c.y=py[idx]+ny*(hw+24); const vn=c.vx*nx+c.vy*ny; if(vn>0){ c.vx-=vn*1.5*nx; c.vy-=vn*1.5*ny; c.vx*=.92; c.vy*=.92; if(vn>150) beep(120,.08,"square",.04); } }
+        let d=idx-c.last; if(d>N/2) d-=N; if(d<-N/2) d+=N; c.prog+=d; c.last=idx; c.idx=idx;
+        if(!c.fin&&c.prog>=this.laps*N){ c.fin=t; if(!this.first){ this.first=c; this.endAt=t+5; beep(880,.3,"triangle",.07); } }
+      });
+      for(let a=0;a<cs.length;a++) for(let b=a+1;b<cs.length;b++){ const p=cs[a], q=cs[b], dx=q.x-p.x, dy=q.y-p.y, d=Math.hypot(dx,dy);
+        if(d<24&&d>0){ const nx=dx/d, ny=dy/d, ov=24-d; p.x-=nx*ov/2; p.y-=ny*ov/2; q.x+=nx*ov/2; q.y+=ny*ov/2;
+          const rel=(q.vx-p.vx)*nx+(q.vy-p.vy)*ny; if(rel<0){ const j=-1.5*rel/2; p.vx-=j*nx; p.vy-=j*ny; q.vx+=j*nx; q.vy+=j*ny; if(rel<-60){ beep(150,.06,"square",.04); burst((p.x+q.x)/2,(p.y+q.y)/2,"#fc6",5); shake=Math.max(shake,.12); } } } }
+      const hs=cs.filter(c=>c.h);
+      if((this.first&&(t>=this.endAt||hs.every(c=>c.fin)))||t>150){
+        const rk=this.rank(), w=rk[0]; if(w.h) w.h.wins++;
+        return this.nm(w)+" wins!"+(rk[1]?"  2nd: "+this.nm(rk[1]):"")+(rk[2]?"  3rd: "+this.nm(rk[2]):"");
+      }
+    },
+    btn(s){ s.nb=.9; },
+    draw(pl){
+      ctx.drawImage(this.bg,0,0); ctx.drawImage(this.skid,0,0);
+      this.cars.forEach(c=>{
+        ctx.save(); ctx.translate(c.x,c.y); ctx.rotate(c.a);
+        if(c.boost){ ctx.fillStyle="#ff9a1a"; ctx.beginPath(); ctx.moveTo(-13,-4); ctx.lineTo(-27-Math.random()*9,0); ctx.lineTo(-13,4); ctx.fill(); }
+        ctx.fillStyle="#111"; ctx.fillRect(-9,-9,6,3); ctx.fillRect(-9,6,6,3); ctx.fillRect(5,-9,6,3); ctx.fillRect(5,6,6,3);
+        ctx.fillStyle=c.h?col(c.h):"#8a8a8a"; ctx.fillRect(-13,-6,26,12);
+        ctx.fillStyle="rgba(0,0,0,.45)"; ctx.fillRect(1,-4.5,6,9);
+        ctx.fillStyle="#fff"; ctx.fillRect(10,-5,2,2); ctx.fillRect(10,3,2,2);
+        ctx.restore();
+        txt(c.h?"P"+(c.h.i+1):"BOT",c.x,c.y-16,11,"#fff"); });
+      const rk=this.rank(); ctx.fillStyle="rgba(0,0,0,.6)"; ctx.fillRect(390,190,140,14+rk.length*20);
+      rk.forEach((c,k)=>{ ctx.fillStyle=c.h?col(c.h):"#8a8a8a"; ctx.fillRect(398,202+k*20-9,10,10);
+        txt((k+1)+". "+(c.h?"P"+(c.h.i+1):"BOT")+(c.fin?"  ✔":"  L"+Math.min(this.laps,Math.max(1,Math.floor(c.prog/this.N)+1))),415,202+k*20+2,13,"#fff","left"); });
+    },
+    st(s){ const c=this.cars&&this.cars.find(z=>z.h===s); if(!c) return ""; const rk=this.rank();
+      return c.fin?"FINISHED!":"Lap "+Math.min(this.laps,Math.max(1,Math.floor(c.prog/this.N)+1))+"/"+this.laps+" · "+(rk.indexOf(c)+1)+"/"+rk.length+" · NITRO "+Math.round(c.n*100)+"%"; } }
   ];
 
   // ---------- round control ----------
@@ -344,7 +469,7 @@ function startGame(){
   const km={ArrowLeft:"l",a:"l",ArrowRight:"r",d:"r",ArrowUp:"u",w:"u",ArrowDown:"d",s:"d"};
   addEventListener("keydown",e=>{
     if(km[e.key]) K[km[e.key]]=1;
-    if(state==="home"){ const d={ArrowLeft:-1,a:-1,ArrowRight:1,d:1,ArrowUp:-4,w:-4,ArrowDown:4,s:4}[e.key]; if(d) hc=Math.max(0,Math.min(G.length-1,hc+d)); }
+    if(state==="home"){ const d={ArrowLeft:-1,a:-1,ArrowRight:1,d:1,ArrowUp:-5,w:-5,ArrowDown:5,s:5}[e.key]; if(d) hc=Math.max(0,Math.min(G.length-1,hc+d)); }
     if(e.key==="Enter") begin();
     if(e.key==="Escape") goHome();
     if(e.key===" "){ e.preventDefault(); const k=slots[KBD]; if(k) btnAll(k); else if(state==="home") begin(); }
@@ -352,9 +477,9 @@ function startGame(){
   addEventListener("keyup",e=>{ if(km[e.key]) K[km[e.key]]=0; });
   cv.addEventListener("click",e=>{
     if(state!=="home") return begin();
-    const r=cv.getBoundingClientRect(), x=(e.clientX-r.left)*W/r.width-30, y=(e.clientY-r.top)*H/r.height-120;
-    const c=Math.floor(x/230), rw=Math.floor(y/185), k=rw*4+c;
-    if(c>=0&&c<4&&rw>=0&&rw<2&&x-c*230<210&&y-rw*185<170&&k<G.length){ hc=k; begin(k); }
+    const r=cv.getBoundingClientRect(), x=(e.clientX-r.left)*W/r.width-15, y=(e.clientY-r.top)*H/r.height-120;
+    const c=Math.floor(x/186), rw=Math.floor(y/185), k=rw*5+c;
+    if(c>=0&&c<5&&rw>=0&&rw<2&&x-c*186<170&&y-rw*185<170&&k<G.length){ hc=k; begin(k); }
   });
 
   // ---------- networking ----------
@@ -368,7 +493,7 @@ function startGame(){
       if(!m||m.t!=="in") return;
       const id=tp.split("/").pop(); let s=slots[id];
       if(!s){ if(list().filter(z=>!z.kbd).length>=8) return; delete slots[KBD]; s=slots[id]={i:nextI++,id,tx:0,ty:0,wins:0,in:0,bc:+m.bc||0,go:+m.go||0,hm:+m.hm||0}; }
-      s.seen=performance.now(); s.tx=cl(+m.x||0,1); s.ty=cl(+m.y||0,1);
+      s.seen=performance.now(); s.tx=cl(+m.x||0,1); s.ty=cl(+m.y||0,1); s.st=cl(+m.st||0,1); s.th=+m.th||0; s.br=+m.br||0; s.ni=+m.ni||0;
       if(m.bc>s.bc){ const n=Math.min(3,m.bc-s.bc); s.bc=m.bc; for(let k=0;k<n;k++) btnAll(s); }
       if(m.hm>s.hm){ s.hm=m.hm; goHome(); }
       if(m.go>s.go){ s.go=m.go; begin(); }
@@ -376,19 +501,19 @@ function startGame(){
   } else $("gstat").textContent="Networking library not loaded (keyboard still works)";
   setInterval(()=>{
     const now=performance.now();
-    list().forEach(s=>{ if(!s.id) return; if(now-s.seen>5000){ delete slots[s.id]; return; } tell(s,{t:"s",i:s.i,g:state==="home"?"Home":G[gi].n,x:state==="home"?"MENU · tilt, TAP to pick":s.in?G[gi].st(s):"next round"}); });
+    list().forEach(s=>{ if(!s.id) return; if(now-s.seen>5000){ delete slots[s.id]; return; } tell(s,{t:"s",i:s.i,g:state==="home"?"Home":G[gi].n,c:state==="home"?"tilt":(G[gi].ctl||"tilt"),x:state==="home"?"MENU · tilt, TAP to pick":s.in?G[gi].st(s):"next round"}); });
     const n=list().filter(z=>!z.kbd).length;
     if(net) $("gstat").textContent=(net.up()?"":"Connecting to servers… ")+(n?n+" phone"+(n>1?"s":"")+" connected":"Waiting for phones…");
   },250);
 
   function drawHome(all){
     txt("TILT PARTY",W/2,62,46); txt("Tilt your phone to browse · TAP to pick a game",W/2,92,16,css("--mut"));
-    G.forEach((g,k)=>{ const x=30+(k%4)*230, y=120+((k/4)|0)*185, sel=k===hc;
-      ctx.fillStyle=css("--card"); ctx.globalAlpha=sel?1:.7; ctx.fillRect(x,y,210,170); ctx.globalAlpha=1;
-      ctx.fillStyle=g.c; ctx.fillRect(x,y,210,8);
-      if(sel){ ctx.strokeStyle=css("--fg"); ctx.lineWidth=4; ctx.strokeRect(x,y,210,170); }
-      ctx.font="48px serif"; ctx.textAlign="center"; ctx.fillStyle=css("--fg"); ctx.fillText(g.ic,x+105,y+70);
-      txt(g.n,x+105,y+104,22); txt(g.s,x+105,y+130,13,css("--mut")); });
+    G.forEach((g,k)=>{ const x=15+(k%5)*186, y=120+((k/5)|0)*185, sel=k===hc;
+      ctx.fillStyle=css("--card"); ctx.globalAlpha=sel?1:.7; ctx.fillRect(x,y,170,170); ctx.globalAlpha=1;
+      ctx.fillStyle=g.c; ctx.fillRect(x,y,170,8);
+      if(sel){ ctx.strokeStyle=css("--fg"); ctx.lineWidth=4; ctx.strokeRect(x,y,170,170); }
+      ctx.font="48px serif"; ctx.textAlign="center"; ctx.fillStyle=css("--fg"); ctx.fillText(g.ic,x+85,y+70);
+      txt(g.n,x+85,y+104,21); txt(g.s,x+85,y+130,12,css("--mut")); });
     all.forEach((s,k)=>{ const x=50+k*70; ctx.fillStyle=col(s); ctx.beginPath(); ctx.arc(x,498,13,0,7); ctx.fill(); txt("P"+(s.i+1),x,503,11,"#111"); txt(s.wins+"★",x,528,12); });
     if(!all.length) txt("Waiting for players… scan the QR code below, or press Enter to play on keyboard",W/2,505,15,css("--mut"));
   }
@@ -399,7 +524,7 @@ function startGame(){
     const dt=Math.min(.05,(now-last)/1000); last=now;
     const all=list(), pl=all.filter(s=>s.in);
     all.forEach(s=>{ if(s.kbd){ s.tx=K.r-K.l; s.ty=K.d-K.u; } });
-    if(state==="home"){ nc-=dt; if(nc<=0){ let mx=0,my=0; all.forEach(q=>{ if(q.tx>.7)mx=1; else if(q.tx<-.7)mx=-1; if(q.ty>.7)my=1; else if(q.ty<-.7)my=-1; }); if(mx||my){ hc=Math.max(0,Math.min(G.length-1,hc+mx+my*4)); nc=.3; beep(500,.04,"square",.03); } } }
+    if(state==="home"){ nc-=dt; if(nc<=0){ let mx=0,my=0; all.forEach(q=>{ if(q.tx>.7)mx=1; else if(q.tx<-.7)mx=-1; if(q.ty>.7)my=1; else if(q.ty<-.7)my=-1; }); if(mx||my){ hc=Math.max(0,Math.min(G.length-1,hc+mx+my*5)); nc=.3; beep(500,.04,"square",.03); } } }
     if(state==="count"){ const p=Math.ceil(cd); cd-=dt; if(cd>0&&Math.ceil(cd)!==p) beep(440,.1); if(cd<=0){ state="playing"; t=0; beep(880,.2); } }
     shake=Math.max(0,shake-dt);
     if(state==="playing"){ t+=dt; const r=G[gi].step(dt,pl); if(r){ banner=r; state="over"; beep(660,.3,"triangle"); for(let k=0;k<5;k++) burst(Math.random()*W,H/3,COLORS[k],14); } }
